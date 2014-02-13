@@ -1,37 +1,33 @@
 RUSTC ?= rustc
 RUSTFLAGS ?= -O --cfg ndebug
 
-LIBFUSE := $(patsubst %,build/%,$(shell $(RUSTC) --crate-file-name src/lib.rs))
+# Allow out-of-tree builds by searching dependencies based on the directory of this Makefile
+SRCDIR := $(dir $(lastword $(MAKEFILE_LIST)))
+VPATH := $(SRCDIR)
+
+LIBFUSE := $(shell $(RUSTC) --crate-file-name $(SRCDIR)src/lib.rs)
+EXAMPLES := $(patsubst $(SRCDIR)examples/%.rs,fuse_example_%,$(wildcard $(SRCDIR)examples/*.rs))
 
 all: $(LIBFUSE)
 
-check: build/libfuse_test
-	build/libfuse_test
+check: libfuse_test
+	./libfuse_test
+
+examples: $(EXAMPLES)
 
 clean:
-	rm -rf build
+	rm -f $(LIBFUSE) libfuse.d libfuse_test libfuse_test.d $(EXAMPLES)
 
-.PHONY: all check clean
+.PHONY: all check examples clean
 
 $(LIBFUSE): src/lib.rs
-	mkdir -p build
-	$(RUSTC) $(RUSTFLAGS) --dep-info build/libfuse.d --out-dir $(dir $@) $<
+	$(RUSTC) $(RUSTFLAGS) --dep-info libfuse.d $<
 
--include build/libfuse.d
+libfuse_test: src/lib.rs
+	$(RUSTC) $(RUSTFLAGS) --dep-info libfuse_test.d --test -o $@ $<
 
-build/libfuse_test: src/lib.rs
-	mkdir -p build
-	$(RUSTC) $(RUSTFLAGS) --dep-info build/libfuse_test.d --test -o $@ $<
+$(EXAMPLES): fuse_example_%: examples/%.rs $(LIBFUSE)
+	$(RUSTC) $(RUSTFLAGS) -L . -C prefer-dynamic -o $@ $<
 
--include build/libfuse_test.d
-
-
-EXAMPLE_SRCS := $(wildcard examples/*.rs)
-EXAMPLE_BINS := $(patsubst examples/%.rs,build/%,$(EXAMPLE_SRCS))
-
-examples: $(EXAMPLE_BINS)
-
-.PHONY: examples
-
-$(EXAMPLE_BINS): build/%: examples/%.rs $(LIBFUSE)
-	$(RUSTC) $(RUSTFLAGS) -L build -C prefer-dynamic -o $@ $<
+-include libfuse.d
+-include libfuse_test.d
